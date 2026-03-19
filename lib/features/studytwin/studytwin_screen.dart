@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:dio/dio.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 
 class StudyTwinScreen extends StatefulWidget {
   const StudyTwinScreen({super.key});
@@ -15,15 +16,14 @@ class _StudyTwinScreenState extends State<StudyTwinScreen> {
   final TextEditingController _controller = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   bool _isTyping = false;
-  final String _apiKey = 'YOUR_API_KEY_HERE'; // Replace with your key
 
   final List<String> _quickPrompts = [
-    '📚 Explain this topic simply',
-    '🧪 Give me examples',
-    '❓ Quiz me on this',
-    '📝 Summarize my notes',
+    '📚 Explain simply',
+    '🧪 Give examples',
+    '❓ Quiz me',
+    '📝 Study tips',
     '🎯 Help me focus',
-    '💡 Study tips',
+    '💡 Summarize',
   ];
 
   @override
@@ -44,35 +44,56 @@ class _StudyTwinScreenState extends State<StudyTwinScreen> {
       _messages.add({'role': 'user', 'content': text});
       _isTyping = true;
     });
-
     _scrollToBottom();
+
+    final box = Hive.box('settings');
+    final apiKey = box.get('geminiApiKey', defaultValue: '');
+
+    if (apiKey.isEmpty) {
+      setState(() {
+        _isTyping = false;
+        _messages.add({
+          'role': 'assistant',
+          'content':
+              '⚠️ Please add your Gemini API key in Settings to use AI Study Twin! Go to Settings → AI Configuration → Add your free key from aistudio.google.com',
+        });
+      });
+      _scrollToBottom();
+      return;
+    }
 
     try {
       final dio = Dio();
-      final conversationMessages = _messages
+      final contents = _messages
           .where((m) => m['role'] != 'typing')
-          .map((m) => {'role': m['role'], 'content': m['content']})
+          .map((m) => {
+                'role': m['role'] == 'user' ? 'user' : 'model',
+                'parts': [
+                  {'text': m['content']}
+                ],
+              })
           .toList();
 
       final response = await dio.post(
-        'https://api.anthropic.com/v1/messages',
+        'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=$apiKey',
         options: Options(
-          headers: {
-            'x-api-key': _apiKey,
-            'anthropic-version': '2023-06-01',
-            'content-type': 'application/json',
-          },
+          headers: {'Content-Type': 'application/json'},
         ),
         data: {
-          'model': 'claude-sonnet-4-20250514',
-          'max_tokens': 1024,
-          'system':
-              'You are an AI Study Twin — a friendly, encouraging personal tutor for students. You help with assignments, explain concepts simply, quiz students, give study tips, and motivate them. Keep responses concise and student-friendly. Use emojis occasionally to keep it engaging. Always be positive and supportive.',
-          'messages': conversationMessages,
+          'contents': contents,
+          'systemInstruction': {
+            'parts': [
+              {
+                'text':
+                    'You are an AI Study Twin — a friendly, encouraging personal tutor for students. Help with assignments, explain concepts simply, quiz students, give study tips, and motivate them. Keep responses concise and student-friendly. Use emojis occasionally. Always be positive and supportive.'
+              }
+            ]
+          },
         },
       );
 
-      final reply = response.data['content'][0]['text'];
+      final reply =
+          response.data['candidates'][0]['content']['parts'][0]['text'];
       setState(() {
         _isTyping = false;
         _messages.add({'role': 'assistant', 'content': reply});
@@ -83,11 +104,10 @@ class _StudyTwinScreenState extends State<StudyTwinScreen> {
         _messages.add({
           'role': 'assistant',
           'content':
-              'Sorry, I couldn\'t connect right now. Please check your API key and internet connection! 🔌',
+              '❌ Connection error. Please check your Gemini API key in Settings!',
         });
       });
     }
-
     _scrollToBottom();
   }
 
@@ -110,167 +130,167 @@ class _StudyTwinScreenState extends State<StudyTwinScreen> {
     return Scaffold(
       backgroundColor:
           isDark ? const Color(0xFF0D0D1A) : const Color(0xFFF4F6FF),
-      body: Column(
-        children: [
-          // App bar
-          Container(
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                colors: [Color(0xFF1A237E), Color(0xFF3949AB)],
+      body: SafeArea(
+        child: Column(
+          children: [
+            // App bar
+            Container(
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [Color(0xFF1A237E), Color(0xFF3949AB)],
+                ),
               ),
-            ),
-            child: SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 44,
-                      height: 44,
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.2),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: const Icon(Icons.psychology_rounded,
-                          color: Colors.white, size: 26),
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+              child: Row(
+                children: [
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(12),
                     ),
-                    const SizedBox(width: 12),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('AI Study Twin',
-                            style: GoogleFonts.poppins(
-                                fontSize: 18,
-                                fontWeight: FontWeight.w700,
-                                color: Colors.white)),
-                        Row(
-                          children: [
-                            Container(
-                              width: 8,
-                              height: 8,
-                              decoration: const BoxDecoration(
-                                color: Colors.greenAccent,
-                                shape: BoxShape.circle,
-                              ),
+                    child: const Icon(Icons.psychology_rounded,
+                        color: Colors.white, size: 26),
+                  ),
+                  const SizedBox(width: 12),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('AI Study Twin',
+                          style: GoogleFonts.poppins(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.white)),
+                      Row(
+                        children: [
+                          Container(
+                            width: 8,
+                            height: 8,
+                            decoration: const BoxDecoration(
+                              color: Colors.greenAccent,
+                              shape: BoxShape.circle,
                             ),
-                            const SizedBox(width: 6),
-                            Text('Always here to help',
-                                style: GoogleFonts.poppins(
-                                    fontSize: 12, color: Colors.white70)),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
+                          ),
+                          const SizedBox(width: 6),
+                          Text('Always here to help',
+                              style: GoogleFonts.poppins(
+                                  fontSize: 12, color: Colors.white70)),
+                        ],
+                      ),
+                    ],
+                  ),
+                ],
               ),
             ),
-          ),
-          // Quick prompts
-          Container(
-            height: 44,
-            color: isDark ? const Color(0xFF1A1A2E) : Colors.white,
-            child: ListView.builder(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              itemCount: _quickPrompts.length,
-              itemBuilder: (context, index) => GestureDetector(
-                onTap: () => _sendMessage(_quickPrompts[index]),
-                child: Container(
-                  margin: const EdgeInsets.only(right: 8),
-                  padding: const EdgeInsets.symmetric(horizontal: 14),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF1A237E).withOpacity(0.08),
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(
-                        color: const Color(0xFF1A237E).withOpacity(0.2)),
-                  ),
-                  child: Center(
-                    child: Text(_quickPrompts[index],
-                        style: GoogleFonts.poppins(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w500,
-                            color: const Color(0xFF1A237E))),
-                  ),
-                ),
+            // Messages
+            Expanded(
+              child: ListView.builder(
+                controller: _scrollController,
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                itemCount: _messages.length + (_isTyping ? 1 : 0),
+                itemBuilder: (context, index) {
+                  if (index == _messages.length && _isTyping) {
+                    return _buildTypingIndicator();
+                  }
+                  final message = _messages[index];
+                  final isUser = message['role'] == 'user';
+                  return _buildMessage(message['content'], isUser, index);
+                },
               ),
             ),
-          ),
-          // Messages
-          Expanded(
-            child: ListView.builder(
-              controller: _scrollController,
-              padding: const EdgeInsets.all(16),
-              itemCount: _messages.length + (_isTyping ? 1 : 0),
-              itemBuilder: (context, index) {
-                if (index == _messages.length && _isTyping) {
-                  return _buildTypingIndicator();
-                }
-                final message = _messages[index];
-                final isUser = message['role'] == 'user';
-                return _buildMessage(message['content'], isUser, index);
-              },
-            ),
-          ),
-          // Input bar
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
+            // Quick prompts
+            Container(
+              height: 44,
               color: isDark ? const Color(0xFF1A1A2E) : Colors.white,
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.05),
-                  blurRadius: 10,
-                  offset: const Offset(0, -3),
-                ),
-              ],
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _controller,
-                    style: GoogleFonts.poppins(fontSize: 14),
-                    maxLines: null,
-                    textInputAction: TextInputAction.send,
-                    onSubmitted: _sendMessage,
-                    decoration: InputDecoration(
-                      hintText: 'Ask your Study Twin anything...',
-                      hintStyle:
-                          GoogleFonts.poppins(color: Colors.grey[400], fontSize: 13),
-                      filled: true,
-                      fillColor: isDark
-                          ? const Color(0xFF0D0D1A)
-                          : const Color(0xFFF4F6FF),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(24),
-                        borderSide: BorderSide.none,
-                      ),
-                      contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 12),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                GestureDetector(
-                  onTap: () => _sendMessage(_controller.text),
+              child: ListView.builder(
+                scrollDirection: Axis.horizontal,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                itemCount: _quickPrompts.length,
+                itemBuilder: (context, index) => GestureDetector(
+                  onTap: () => _sendMessage(_quickPrompts[index]),
                   child: Container(
-                    width: 48,
-                    height: 48,
-                    decoration: const BoxDecoration(
-                      gradient: LinearGradient(
-                        colors: [Color(0xFF1A237E), Color(0xFF3949AB)],
-                      ),
-                      shape: BoxShape.circle,
+                    margin: const EdgeInsets.only(right: 8),
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                    decoration: BoxDecoration(
+                      color:
+                          const Color(0xFF1A237E).withOpacity(0.08),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                          color: const Color(0xFF1A237E).withOpacity(0.2)),
                     ),
-                    child: const Icon(Icons.send_rounded,
-                        color: Colors.white, size: 20),
+                    child: Center(
+                      child: Text(_quickPrompts[index],
+                          style: GoogleFonts.poppins(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w500,
+                              color: const Color(0xFF1A237E))),
+                    ),
                   ),
                 ),
-              ],
+              ),
             ),
-          ),
-        ],
+            // Input bar
+            Container(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF1A1A2E) : Colors.white,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.05),
+                    blurRadius: 10,
+                    offset: const Offset(0, -3),
+                  ),
+                ],
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _controller,
+                      style: GoogleFonts.poppins(fontSize: 14),
+                      maxLines: null,
+                      textInputAction: TextInputAction.send,
+                      onSubmitted: _sendMessage,
+                      decoration: InputDecoration(
+                        hintText: 'Ask your Study Twin anything...',
+                        hintStyle: GoogleFonts.poppins(
+                            color: Colors.grey[400], fontSize: 13),
+                        filled: true,
+                        fillColor: isDark
+                            ? const Color(0xFF0D0D1A)
+                            : const Color(0xFFF4F6FF),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(24),
+                          borderSide: BorderSide.none,
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 12),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  GestureDetector(
+                    onTap: () => _sendMessage(_controller.text),
+                    child: Container(
+                      width: 48,
+                      height: 48,
+                      decoration: const BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [Color(0xFF1A237E), Color(0xFF3949AB)],
+                        ),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.send_rounded,
+                          color: Colors.white, size: 20),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -301,7 +321,8 @@ class _StudyTwinScreenState extends State<StudyTwinScreen> {
           ],
           Flexible(
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               decoration: BoxDecoration(
                 gradient: isUser
                     ? const LinearGradient(
@@ -362,7 +383,8 @@ class _StudyTwinScreenState extends State<StudyTwinScreen> {
           ),
           const SizedBox(width: 8),
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            padding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             decoration: BoxDecoration(
               color: Colors.white,
               borderRadius: BorderRadius.circular(18),

@@ -4,7 +4,7 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:dio/dio.dart';
 import 'package:uuid/uuid.dart';
 import '../../core/services/db_service.dart';
-
+import 'package:hive_flutter/hive_flutter.dart';
 class AssignmentsScreen extends StatefulWidget {
   final String? subjectId;
   final String? subjectName;
@@ -45,74 +45,85 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
     }
   }
 
-  Future<void> _generateAssignment() async {
-    if (_questionController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Please enter a question or topic',
-              style: GoogleFonts.poppins()),
-          backgroundColor: Colors.red,
-        ),
-      );
-      return;
-    }
+ Future<void> _generateAssignment() async {
+  if (_questionController.text.trim().isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Please enter a question or topic',
+            style: GoogleFonts.poppins()),
+        backgroundColor: Colors.red,
+      ),
+    );
+    return;
+  }
 
-    setState(() {
-      _isGenerating = true;
-      _generatedContent = '';
-    });
+  final box = Hive.box('settings');
+  final apiKey = box.get('geminiApiKey', defaultValue: '');
 
-    try {
-      final dio = Dio();
-      final prompt = '''
-Write a complete assignment answer for the following question. 
+  if (apiKey.isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Please add your Gemini API key in Settings!',
+            style: GoogleFonts.poppins()),
+        backgroundColor: Colors.orange,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+    return;
+  }
+
+  setState(() {
+    _isGenerating = true;
+    _generatedContent = '';
+  });
+
+  try {
+    final dio = Dio();
+    final prompt = '''Write a complete assignment answer for the following question. 
 The answer should be worth ${_selectedMarks} marks.
 ${_selectedMarks == 5 ? 'Write approximately 150-200 words with 2-3 key points.' : _selectedMarks == 10 ? 'Write approximately 300-400 words with 4-5 key points and examples.' : 'Write approximately 500-600 words with comprehensive coverage, examples, and detailed explanation.'}
 
 Format the answer with:
 - Title
-- Introduction (2-3 sentences)
-- Main Body (key points with explanation)
-- Conclusion (2-3 sentences)
+- Introduction
+- Main Body with key points
+- Conclusion
 
 Question: ${_questionController.text.trim()}
 
-Write in a clear, academic style suitable for a student answer.
-''';
+Write in clear academic style suitable for a student answer.''';
 
-      final response = await dio.post(
-        'https://api.anthropic.com/v1/messages',
-        options: Options(
-          headers: {
-            'x-api-key': _apiKey,
-            'anthropic-version': '2023-06-01',
-            'content-type': 'application/json',
-          },
-        ),
-        data: {
-          'model': 'claude-sonnet-4-20250514',
-          'max_tokens': 1024,
-          'messages': [
-            {'role': 'user', 'content': prompt}
-          ],
-        },
-      );
+    final response = await dio.post(
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=$apiKey',
+      options: Options(
+        headers: {'Content-Type': 'application/json'},
+      ),
+      data: {
+        'contents': [
+          {
+            'parts': [
+              {'text': prompt}
+            ]
+          }
+        ],
+      },
+    );
 
-      final content = response.data['content'][0]['text'];
-      setState(() {
-        _generatedContent = content;
-        _isGenerating = false;
-      });
-
-      // Save to history
-      await _saveAssignment(content);
-    } catch (e) {
-      setState(() {
-        _generatedContent = 'Error generating assignment. Please check your API key and try again.';
-        _isGenerating = false;
-      });
-    }
+    final content = response
+        .data['candidates'][0]['content']['parts'][0]['text'];
+    setState(() {
+      _generatedContent = content;
+      _isGenerating = false;
+    });
+    await _saveAssignment(content);
+  } catch (e) {
+    setState(() {
+      _generatedContent =
+          'Error generating assignment. Please check your Gemini API key in Settings!';
+      _isGenerating = false;
+    });
   }
+}
 
   Future<void> _saveAssignment(String content) async {
     try {
@@ -136,6 +147,7 @@ Write in a clear, academic style suitable for a student answer.
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
+      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
       backgroundColor: isDark ? const Color(0xFF0D0D1A) : const Color(0xFFF4F6FF),
       body: CustomScrollView(
         slivers: [

@@ -5,14 +5,17 @@ import 'package:hive_flutter/hive_flutter.dart';
 import 'core/theme/app_theme.dart';
 import 'core/router/app_router.dart';
 import 'core/services/db_service.dart';
-
+import 'core/services/notification_service.dart';
+import 'core/services/storage_service.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-
+  await NotificationService.instance.init();
+await NotificationService.instance.requestPermission();
   // Initialize Hive
   await Hive.initFlutter();
   await Hive.openBox('settings');
   await Hive.openBox('flashcards');
+  await StorageService.instance.init();
 
   // Initialize SQLite only on mobile (not web)
   if (!kIsWeb) {

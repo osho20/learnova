@@ -31,6 +31,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
       body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(

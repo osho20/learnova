@@ -3,7 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:uuid/uuid.dart';
 import 'dart:math';
-
+import '../../core/services/storage_service.dart';
 class FlashcardsScreen extends StatefulWidget {
   const FlashcardsScreen({super.key});
 
@@ -11,42 +11,96 @@ class FlashcardsScreen extends StatefulWidget {
   State<FlashcardsScreen> createState() => _FlashcardsScreenState();
 }
 
-class _FlashcardsScreenState extends State<FlashcardsScreen> {
+class _FlashcardsScreenState extends State<FlashcardsScreen>
+    with TickerProviderStateMixin {
   List<Map<String, dynamic>> _flashcards = [];
   bool _isReviewMode = false;
   int _currentIndex = 0;
   bool _isFlipped = false;
+  late AnimationController _flipController;
+  late Animation<double> _flipAnimation;
 
-  void _addFlashcard(String question, String answer) {
-    setState(() {
-      _flashcards.add({
-        'id': const Uuid().v4(),
-        'question': question,
-        'answer': answer,
-        'isDifficult': false,
-        'createdAt': DateTime.now().toIso8601String(),
+  @override
+  void initState() {
+    super.initState();
+    _loadFlashcards();
+    _flipController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 500),
+    );
+    _flipAnimation = Tween<double>(begin: 0, end: 1).animate(
+      CurvedAnimation(parent: _flipController, curve: Curves.easeInOutCubic),
+    );
+    
+  }
+void _loadFlashcards() {
+  setState(() {
+    _flashcards = StorageService.instance.getFlashcards();
+  });
+}
+  @override
+  void dispose() {
+    _flipController.dispose();
+    super.dispose();
+  }
+
+  void _flipCard() {
+    if (_isFlipped) {
+      _flipController.reverse();
+    } else {
+      _flipController.forward();
+    }
+    setState(() => _isFlipped = !_isFlipped);
+  }
+
+  void _nextCard() {
+    if (_currentIndex < _flashcards.length - 1) {
+      _flipController.reset();
+      setState(() {
+        _currentIndex++;
+        _isFlipped = false;
       });
-    });
+    }
   }
 
-  void _deleteFlashcard(String id) {
-    setState(() => _flashcards.removeWhere((f) => f['id'] == id));
+  void _prevCard() {
+    if (_currentIndex > 0) {
+      _flipController.reset();
+      setState(() {
+        _currentIndex--;
+        _isFlipped = false;
+      });
+    }
   }
+void _addFlashcard(String question, String answer) {
+  final card = {
+    'id': const Uuid().v4(),
+    'question': question,
+    'answer': answer,
+    'isDifficult': false,
+    'createdAt': DateTime.now().toIso8601String(),
+  };
+  StorageService.instance.saveFlashcard(card);
+  setState(() => _flashcards.add(card));
+}
+void _deleteFlashcard(String id) {
+  StorageService.instance.deleteFlashcard(id);
+  setState(() => _flashcards.removeWhere((f) => f['id'] == id));
+}
 
-  void _toggleDifficult(String id) {
-    setState(() {
-      final index = _flashcards.indexWhere((f) => f['id'] == id);
-      if (index != -1) {
-        _flashcards[index] = {
-          ..._flashcards[index],
-          'isDifficult': !_flashcards[index]['isDifficult'],
-        };
-      }
-    });
-  }
-
+ void _toggleDifficult(String id) {
+  setState(() {
+    final index = _flashcards.indexWhere((f) => f['id'] == id);
+    if (index != -1) {
+      _flashcards[index] = {
+        ..._flashcards[index],
+        'isDifficult': !(_flashcards[index]['isDifficult'] as bool),
+      };
+      StorageService.instance.updateFlashcard(_flashcards[index]);
+    }
+  });
+}
   void _startReview({bool difficultOnly = false}) {
-    void _startReview({bool difficultOnly = false}) {
     List<Map<String, dynamic>> cards = difficultOnly
         ? _flashcards.where((f) => f['isDifficult'] == true).toList()
         : List<Map<String, dynamic>>.from(_flashcards);
@@ -55,18 +109,20 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
         SnackBar(
           content: Text('No cards to review!', style: GoogleFonts.poppins()),
           backgroundColor: const Color(0xFF1A237E),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         ),
       );
       return;
     }
     cards.shuffle(Random());
+    _flipController.reset();
     setState(() {
       _flashcards = cards;
       _isReviewMode = true;
       _currentIndex = 0;
       _isFlipped = false;
     });
-  }
   }
 
   void _showAddFlashcardSheet() {
@@ -85,7 +141,7 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
         decoration: BoxDecoration(
           color: Theme.of(context).brightness == Brightness.dark
               ? const Color(0xFF1A1A2E) : Colors.white,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -103,45 +159,95 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
             const SizedBox(height: 20),
             Text('New Flashcard',
                 style: GoogleFonts.poppins(fontSize: 22,
-                    fontWeight: FontWeight.w700, color: const Color(0xFF1A237E))),
+                    fontWeight: FontWeight.w700,
+                    color: const Color(0xFF1A237E))),
+            const SizedBox(height: 8),
+            Text('Add a question and answer',
+                style: GoogleFonts.poppins(fontSize: 13, color: Colors.grey)),
             const SizedBox(height: 20),
-            TextField(
-              controller: questionController,
-              maxLines: 3,
-              style: GoogleFonts.poppins(fontSize: 14),
-              decoration: InputDecoration(
-                hintText: 'Question / Front side...',
-                hintStyle: GoogleFonts.poppins(color: Colors.grey[400]),
-                filled: true,
-                fillColor: const Color(0xFFF4F6FF),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide.none,
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: Color(0xFF1A237E), width: 2),
-                ),
+            Container(
+              decoration: BoxDecoration(
+                color: const Color(0xFF1A237E).withOpacity(0.05),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                    color: const Color(0xFF1A237E).withOpacity(0.2)),
+              ),
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF1A237E),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text('FRONT',
+                            style: GoogleFonts.poppins(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.white)),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: questionController,
+                    maxLines: 3,
+                    style: GoogleFonts.poppins(fontSize: 14),
+                    decoration: InputDecoration(
+                      hintText: 'Question...',
+                      hintStyle: GoogleFonts.poppins(color: Colors.grey[400]),
+                      border: InputBorder.none,
+                    ),
+                  ),
+                ],
               ),
             ),
             const SizedBox(height: 12),
-            TextField(
-              controller: answerController,
-              maxLines: 3,
-              style: GoogleFonts.poppins(fontSize: 14),
-              decoration: InputDecoration(
-                hintText: 'Answer / Back side...',
-                hintStyle: GoogleFonts.poppins(color: Colors.grey[400]),
-                filled: true,
-                fillColor: const Color(0xFFF4F6FF),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide.none,
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: Color(0xFF1A237E), width: 2),
-                ),
+            Container(
+              decoration: BoxDecoration(
+                color: const Color(0xFF00695C).withOpacity(0.05),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                    color: const Color(0xFF00695C).withOpacity(0.2)),
+              ),
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF00695C),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text('BACK',
+                            style: GoogleFonts.poppins(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.white)),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: answerController,
+                    maxLines: 3,
+                    style: GoogleFonts.poppins(fontSize: 14),
+                    decoration: InputDecoration(
+                      hintText: 'Answer...',
+                      hintStyle: GoogleFonts.poppins(color: Colors.grey[400]),
+                      border: InputBorder.none,
+                    ),
+                  ),
+                ],
               ),
             ),
             const SizedBox(height: 20),
@@ -180,12 +286,12 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    if (_isReviewMode) {
-      return _buildReviewMode(isDark);
-    }
+    if (_isReviewMode) return _buildReviewMode(isDark);
 
     return Scaffold(
-      backgroundColor: isDark ? const Color(0xFF0D0D1A) : const Color(0xFFF4F6FF),
+      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
+      backgroundColor:
+          isDark ? const Color(0xFF0D0D1A) : const Color(0xFFF4F6FF),
       body: CustomScrollView(
         slivers: [
           SliverAppBar(
@@ -208,8 +314,9 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
                       children: [
                         Text('Flashcards',
                             style: GoogleFonts.poppins(fontSize: 28,
-                                fontWeight: FontWeight.w700, color: Colors.white)),
-                        Text('${_flashcards.length} cards',
+                                fontWeight: FontWeight.w700,
+                                color: Colors.white)),
+                        Text('${_flashcards.length} cards • Long press to delete',
                             style: GoogleFonts.poppins(
                                 fontSize: 13, color: Colors.white70)),
                       ],
@@ -229,22 +336,30 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
                       child: GestureDetector(
                         onTap: () => _startReview(),
                         child: Container(
-                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          padding: const EdgeInsets.symmetric(vertical: 18),
                           decoration: BoxDecoration(
                             gradient: const LinearGradient(
                               colors: [Color(0xFF1A237E), Color(0xFF3949AB)],
                             ),
-                            borderRadius: BorderRadius.circular(16),
+                            borderRadius: BorderRadius.circular(18),
+                            boxShadow: [
+                              BoxShadow(
+                                color: const Color(0xFF1A237E).withOpacity(0.3),
+                                blurRadius: 12,
+                                offset: const Offset(0, 4),
+                              ),
+                            ],
                           ),
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              const Icon(Icons.play_arrow_rounded,
-                                  color: Colors.white),
+                              const Icon(Icons.play_circle_rounded,
+                                  color: Colors.white, size: 24),
                               const SizedBox(width: 8),
                               Text('Review All',
                                   style: GoogleFonts.poppins(
-                                      fontSize: 15, fontWeight: FontWeight.w600,
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w700,
                                       color: Colors.white)),
                             ],
                           ),
@@ -256,20 +371,23 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
                       child: GestureDetector(
                         onTap: () => _startReview(difficultOnly: true),
                         child: Container(
-                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          padding: const EdgeInsets.symmetric(vertical: 18),
                           decoration: BoxDecoration(
-                            color: Colors.red.withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(color: Colors.red.withOpacity(0.3)),
+                            color: Colors.red.withOpacity(0.08),
+                            borderRadius: BorderRadius.circular(18),
+                            border: Border.all(
+                                color: Colors.red.withOpacity(0.3), width: 1.5),
                           ),
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              const Icon(Icons.star_rounded, color: Colors.red),
+                              const Icon(Icons.star_rounded,
+                                  color: Colors.red, size: 24),
                               const SizedBox(width: 8),
-                              Text('Difficult',
+                              Text('Hard Cards',
                                   style: GoogleFonts.poppins(
-                                      fontSize: 15, fontWeight: FontWeight.w600,
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w700,
                                       color: Colors.red)),
                             ],
                           ),
@@ -286,11 +404,13 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(Icons.style_rounded, size: 80, color: Colors.grey[300]),
+                        Icon(Icons.style_rounded,
+                            size: 80, color: Colors.grey[300]),
                         const SizedBox(height: 16),
                         Text('No flashcards yet',
                             style: GoogleFonts.poppins(fontSize: 18,
-                                fontWeight: FontWeight.w600, color: Colors.grey)),
+                                fontWeight: FontWeight.w600,
+                                color: Colors.grey)),
                         const SizedBox(height: 8),
                         Text('Tap + to create your first card',
                             style: GoogleFonts.poppins(
@@ -305,72 +425,113 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
                     delegate: SliverChildBuilderDelegate(
                       (context, index) {
                         final card = _flashcards[index];
-                        return Container(
-                          margin: const EdgeInsets.only(bottom: 12),
-                          decoration: BoxDecoration(
-                            color: isDark ? const Color(0xFF1A1A2E) : Colors.white,
-                            borderRadius: BorderRadius.circular(16),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.04),
-                                blurRadius: 10,
-                                offset: const Offset(0, 4),
-                              ),
-                            ],
-                          ),
-                          child: ListTile(
-                            contentPadding: const EdgeInsets.all(16),
-                            leading: Container(
-                              width: 44, height: 44,
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF1A237E).withOpacity(0.1),
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: const Icon(Icons.style_rounded,
-                                  color: Color(0xFF1A237E)),
-                            ),
-                            title: Text(card['question'],
-                                style: GoogleFonts.poppins(
-                                    fontSize: 14, fontWeight: FontWeight.w600),
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis),
-                            subtitle: Padding(
-                              padding: const EdgeInsets.only(top: 4),
-                              child: Text(card['answer'],
-                                  style: GoogleFonts.poppins(
-                                      fontSize: 12, color: Colors.grey),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis),
-                            ),
-                            trailing: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                IconButton(
-                                  onPressed: () => _toggleDifficult(card['id']),
-                                  icon: Icon(
-                                    card['isDifficult'] == true
-                                        ? Icons.star_rounded
-                                        : Icons.star_border_rounded,
-                                    color: card['isDifficult'] == true
-                                        ? Colors.amber : Colors.grey,
-                                  ),
-                                ),
-                                IconButton(
-                                  onPressed: () => _deleteFlashcard(card['id']),
-                                  icon: const Icon(Icons.delete_outline_rounded,
-                                      color: Colors.red),
+                        return GestureDetector(
+                          onLongPress: () => _deleteFlashcard(card['id']),
+                          child: Container(
+                            margin: const EdgeInsets.only(bottom: 12),
+                            decoration: BoxDecoration(
+                              color: isDark
+                                  ? const Color(0xFF1A1A2E) : Colors.white,
+                              borderRadius: BorderRadius.circular(18),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withOpacity(0.04),
+                                  blurRadius: 12,
+                                  offset: const Offset(0, 4),
                                 ),
                               ],
                             ),
-                          ),
-                        ).animate().fadeIn(delay: (index * 80).ms)
-                            .slideX(begin: -0.1, end: 0);
+                            child: Column(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(16),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF1A237E)
+                                        .withOpacity(0.05),
+                                    borderRadius: const BorderRadius.vertical(
+                                        top: Radius.circular(18)),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 8, vertical: 3),
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFF1A237E),
+                                          borderRadius:
+                                              BorderRadius.circular(6),
+                                        ),
+                                        child: Text('Q',
+                                            style: GoogleFonts.poppins(
+                                                fontSize: 11,
+                                                fontWeight: FontWeight.w700,
+                                                color: Colors.white)),
+                                      ),
+                                      const SizedBox(width: 10),
+                                      Expanded(
+                                        child: Text(card['question'],
+                                            style: GoogleFonts.poppins(
+                                                fontSize: 14,
+                                                fontWeight: FontWeight.w600),
+                                            maxLines: 2,
+                                            overflow: TextOverflow.ellipsis),
+                                      ),
+                                      IconButton(
+                                        onPressed: () =>
+                                            _toggleDifficult(card['id']),
+                                        icon: Icon(
+                                          card['isDifficult'] == true
+                                              ? Icons.star_rounded
+                                              : Icons.star_border_rounded,
+                                          color: card['isDifficult'] == true
+                                              ? Colors.amber : Colors.grey,
+                                          size: 20,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                Container(
+                                  padding: const EdgeInsets.all(16),
+                                  child: Row(
+                                    children: [
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 8, vertical: 3),
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFF00695C),
+                                          borderRadius:
+                                              BorderRadius.circular(6),
+                                        ),
+                                        child: Text('A',
+                                            style: GoogleFonts.poppins(
+                                                fontSize: 11,
+                                                fontWeight: FontWeight.w700,
+                                                color: Colors.white)),
+                                      ),
+                                      const SizedBox(width: 10),
+                                      Expanded(
+                                        child: Text(card['answer'],
+                                            style: GoogleFonts.poppins(
+                                                fontSize: 13,
+                                                color: Colors.grey[600]),
+                                            maxLines: 2,
+                                            overflow: TextOverflow.ellipsis),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ).animate().fadeIn(delay: (index * 80).ms)
+                              .slideX(begin: -0.1, end: 0),
+                        );
                       },
                       childCount: _flashcards.length,
                     ),
                   ),
                 ),
-          const SliverToBoxAdapter(child: SizedBox(height: 100)),
+          const SliverToBoxAdapter(child: SizedBox(height: 220)),
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
@@ -389,24 +550,44 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
     final progress = (_currentIndex + 1) / _flashcards.length;
 
     return Scaffold(
-      backgroundColor: isDark ? const Color(0xFF0D0D1A) : const Color(0xFFF4F6FF),
+      backgroundColor:
+          isDark ? const Color(0xFF0D0D1A) : const Color(0xFFF4F6FF),
       appBar: AppBar(
         backgroundColor: const Color(0xFF1A237E),
-        title: Text('Review Mode',
-            style: GoogleFonts.poppins(
-                fontSize: 18, fontWeight: FontWeight.w600, color: Colors.white)),
         leading: IconButton(
           icon: const Icon(Icons.close_rounded, color: Colors.white),
-          onPressed: () => setState(() => _isReviewMode = false),
+          onPressed: () {
+            _flipController.reset();
+            setState(() {
+              _isReviewMode = false;
+              _isFlipped = false;
+              _currentIndex = 0;
+            });
+          },
         ),
+        title: Text('Review Mode',
+            style: GoogleFonts.poppins(
+                fontSize: 18, fontWeight: FontWeight.w600,
+                color: Colors.white)),
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 16),
             child: Center(
-              child: Text('${_currentIndex + 1}/${_flashcards.length}',
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 12, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  '${_currentIndex + 1} / ${_flashcards.length}',
                   style: GoogleFonts.poppins(
-                      fontSize: 14, fontWeight: FontWeight.w600,
-                      color: Colors.white70)),
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white),
+                ),
+              ),
             ),
           ),
         ],
@@ -417,164 +598,257 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
           LinearProgressIndicator(
             value: progress,
             backgroundColor: Colors.grey[200],
-            valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF1A237E)),
+            valueColor: const AlwaysStoppedAnimation<Color>(
+                Color(0xFF1A237E)),
             minHeight: 4,
           ),
           Expanded(
             child: Padding(
               padding: const EdgeInsets.all(24),
               child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Text(_isFlipped ? 'Answer' : 'Question',
-                      style: GoogleFonts.poppins(
-                          fontSize: 14, color: Colors.grey,
-                          fontWeight: FontWeight.w500)),
                   const SizedBox(height: 20),
+                  // Flip hint
+                  AnimatedOpacity(
+                    opacity: _isFlipped ? 0 : 1,
+                    duration: const Duration(milliseconds: 300),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF1A237E).withOpacity(0.08),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.touch_app_rounded,
+                              size: 16, color: Color(0xFF1A237E)),
+                          const SizedBox(width: 6),
+                          Text('Tap card to reveal answer',
+                              style: GoogleFonts.poppins(
+                                  fontSize: 12,
+                                  color: const Color(0xFF1A237E))),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
                   // 3D Flip Card
-                  GestureDetector(
-                    onTap: () => setState(() => _isFlipped = !_isFlipped),
-                    child: TweenAnimationBuilder(
-                      tween: Tween<double>(
-                          begin: 0, end: _isFlipped ? pi : 0),
-                      duration: const Duration(milliseconds: 400),
-                      builder: (context, double value, child) {
-                        final showFront = value < pi / 2;
-                        return Transform(
-                          transform: Matrix4.identity()
-                            ..setEntry(3, 2, 0.001)
-                            ..rotateY(value),
-                          alignment: Alignment.center,
-                          child: Container(
-                            width: double.infinity,
-                            height: 280,
-                            decoration: BoxDecoration(
-                              gradient: LinearGradient(
-                                begin: Alignment.topLeft,
-                                end: Alignment.bottomRight,
-                                colors: showFront
-                                    ? [const Color(0xFF1A237E), const Color(0xFF3949AB)]
-                                    : [const Color(0xFF00695C), const Color(0xFF00897B)],
-                              ),
-                              borderRadius: BorderRadius.circular(24),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: (showFront
-                                      ? const Color(0xFF1A237E)
-                                      : const Color(0xFF00695C)).withOpacity(0.3),
-                                  blurRadius: 20,
-                                  offset: const Offset(0, 10),
+                  Expanded(
+                    child: GestureDetector(
+                      onTap: _flipCard,
+                      child: AnimatedBuilder(
+                        animation: _flipAnimation,
+                        builder: (context, child) {
+                          final angle = _flipAnimation.value * pi;
+                          final showFront = angle < pi / 2;
+                          return Transform(
+                            transform: Matrix4.identity()
+                              ..setEntry(3, 2, 0.001)
+                              ..rotateY(angle),
+                            alignment: Alignment.center,
+                            child: Container(
+                              width: double.infinity,
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
+                                  colors: showFront
+                                      ? [
+                                          const Color(0xFF1A237E),
+                                          const Color(0xFF3949AB),
+                                        ]
+                                      : [
+                                          const Color(0xFF00695C),
+                                          const Color(0xFF00897B),
+                                        ],
                                 ),
-                              ],
-                            ),
-                            child: Center(
-                              child: Padding(
-                                padding: const EdgeInsets.all(24),
-                                child: Transform(
-                                  transform: Matrix4.identity()
-                                    ..rotateY(showFront ? 0 : pi),
-                                  alignment: Alignment.center,
-                                  child: Text(
-                                    showFront
-                                        ? card['question']
-                                        : card['answer'],
-                                    style: GoogleFonts.poppins(
-                                        fontSize: 18,
-                                        fontWeight: FontWeight.w600,
-                                        color: Colors.white,
-                                        height: 1.5),
-                                    textAlign: TextAlign.center,
+                                borderRadius: BorderRadius.circular(28),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: (showFront
+                                        ? const Color(0xFF1A237E)
+                                        : const Color(0xFF00695C))
+                                        .withOpacity(0.4),
+                                    blurRadius: 30,
+                                    offset: const Offset(0, 15),
+                                  ),
+                                ],
+                              ),
+                              child: Center(
+                                child: Padding(
+                                  padding: const EdgeInsets.all(32),
+                                  child: Transform(
+                                    transform: Matrix4.identity()
+                                      ..rotateY(showFront ? 0 : pi),
+                                    alignment: Alignment.center,
+                                    child: Column(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
+                                      children: [
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 16, vertical: 6),
+                                          decoration: BoxDecoration(
+                                            color: Colors.white
+                                                .withOpacity(0.2),
+                                            borderRadius:
+                                                BorderRadius.circular(20),
+                                          ),
+                                          child: Text(
+                                            showFront
+                                                ? 'QUESTION'
+                                                : 'ANSWER',
+                                            style: GoogleFonts.poppins(
+                                                fontSize: 11,
+                                                fontWeight: FontWeight.w700,
+                                                color: Colors.white70,
+                                                letterSpacing: 1.5),
+                                          ),
+                                        ),
+                                        const SizedBox(height: 24),
+                                        Text(
+                                          showFront
+                                              ? card['question']
+                                              : card['answer'],
+                                          style: GoogleFonts.poppins(
+                                              fontSize: 20,
+                                              fontWeight: FontWeight.w700,
+                                              color: Colors.white,
+                                              height: 1.5),
+                                          textAlign: TextAlign.center,
+                                        ),
+                                      ],
+                                    ),
                                   ),
                                 ),
                               ),
                             ),
-                          ),
-                        );
-                      },
+                          );
+                        },
+                      ),
                     ),
                   ),
-                  const SizedBox(height: 16),
-                  Text('Tap card to flip',
-                      style: GoogleFonts.poppins(
-                          fontSize: 13, color: Colors.grey)),
                   const SizedBox(height: 32),
-                  // Navigation buttons
+                  // Navigation
                   Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      IconButton(
-                        onPressed: _currentIndex > 0
-                            ? () => setState(() {
-                                  _currentIndex--;
-                                  _isFlipped = false;
-                                })
-                            : null,
-                        icon: const Icon(Icons.arrow_back_ios_rounded),
-                        style: IconButton.styleFrom(
-                          backgroundColor: const Color(0xFF1A237E).withOpacity(0.1),
+                      GestureDetector(
+                        onTap: _prevCard,
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 200),
                           padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: _currentIndex > 0
+                                ? const Color(0xFF1A237E).withOpacity(0.1)
+                                : Colors.grey.withOpacity(0.05),
+                            borderRadius: BorderRadius.circular(18),
+                          ),
+                          child: Icon(
+                            Icons.arrow_back_ios_rounded,
+                            color: _currentIndex > 0
+                                ? const Color(0xFF1A237E)
+                                : Colors.grey,
+                            size: 22,
+                          ),
                         ),
                       ),
-                      ElevatedButton.icon(
-                        onPressed: () => _toggleDifficult(card['id']),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: card['isDifficult'] == true
-                              ? Colors.amber : Colors.grey.withOpacity(0.2),
+                      GestureDetector(
+                        onTap: () => _toggleDifficult(card['id']),
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 200),
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 20, vertical: 12),
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12)),
-                        ),
-                        icon: Icon(
-                          card['isDifficult'] == true
-                              ? Icons.star_rounded : Icons.star_border_rounded,
-                          color: card['isDifficult'] == true
-                              ? Colors.white : Colors.grey,
-                        ),
-                        label: Text(
-                          card['isDifficult'] == true ? 'Difficult' : 'Mark Hard',
-                          style: GoogleFonts.poppins(
-                              fontSize: 13,
+                              horizontal: 24, vertical: 14),
+                          decoration: BoxDecoration(
+                            color: card['isDifficult'] == true
+                                ? Colors.amber.withOpacity(0.15)
+                                : Colors.grey.withOpacity(0.08),
+                            borderRadius: BorderRadius.circular(18),
+                            border: Border.all(
                               color: card['isDifficult'] == true
-                                  ? Colors.white : Colors.grey),
+                                  ? Colors.amber
+                                  : Colors.transparent,
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                card['isDifficult'] == true
+                                    ? Icons.star_rounded
+                                    : Icons.star_border_rounded,
+                                color: card['isDifficult'] == true
+                                    ? Colors.amber
+                                    : Colors.grey,
+                                size: 20,
+                              ),
+                              const SizedBox(width: 6),
+                              Text(
+                                card['isDifficult'] == true
+                                    ? 'Hard'
+                                    : 'Mark Hard',
+                                style: GoogleFonts.poppins(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                    color: card['isDifficult'] == true
+                                        ? Colors.amber
+                                        : Colors.grey),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
-                      IconButton(
-                        onPressed: _currentIndex < _flashcards.length - 1
-                            ? () => setState(() {
-                                  _currentIndex++;
-                                  _isFlipped = false;
-                                })
-                            : null,
-                        icon: const Icon(Icons.arrow_forward_ios_rounded),
-                        style: IconButton.styleFrom(
-                          backgroundColor: const Color(0xFF1A237E).withOpacity(0.1),
+                      GestureDetector(
+                        onTap: _nextCard,
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 200),
                           padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: _currentIndex < _flashcards.length - 1
+                                ? const Color(0xFF1A237E).withOpacity(0.1)
+                                : Colors.grey.withOpacity(0.05),
+                            borderRadius: BorderRadius.circular(18),
+                          ),
+                          child: Icon(
+                            Icons.arrow_forward_ios_rounded,
+                            color: _currentIndex < _flashcards.length - 1
+                                ? const Color(0xFF1A237E)
+                                : Colors.grey,
+                            size: 22,
+                          ),
                         ),
                       ),
                     ],
                   ),
                   if (_currentIndex == _flashcards.length - 1) ...[
-                    const SizedBox(height: 24),
+                    const SizedBox(height: 20),
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton(
-                        onPressed: () => setState(() {
-                          _isReviewMode = false;
-                        }),
+                        onPressed: () {
+                          _flipController.reset();
+                          setState(() {
+                            _isReviewMode = false;
+                            _isFlipped = false;
+                            _currentIndex = 0;
+                          });
+                        },
                         style: ElevatedButton.styleFrom(
                           backgroundColor: const Color(0xFF1A237E),
                           padding: const EdgeInsets.symmetric(vertical: 16),
                           shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(14)),
+                              borderRadius: BorderRadius.circular(16)),
                         ),
-                        child: Text('Finish Review 🎉',
+                        child: Text('🎉 Finish Review!',
                             style: GoogleFonts.poppins(
-                                fontSize: 16, fontWeight: FontWeight.w600,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
                                 color: Colors.white)),
                       ),
                     ),
                   ],
+                  const SizedBox(height: 20),
                 ],
               ),
             ),

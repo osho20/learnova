@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:uuid/uuid.dart';
-
+import '../../core/services/storage_service.dart';
 class AttendanceScreen extends StatefulWidget {
   const AttendanceScreen({super.key});
 
@@ -12,35 +12,38 @@ class AttendanceScreen extends StatefulWidget {
 
 class _AttendanceScreenState extends State<AttendanceScreen> {
   List<Map<String, dynamic>> _subjects = [];
-
-  void _addSubject(String name) {
-    setState(() {
-      _subjects.add({
-        'id': const Uuid().v4(),
-        'name': name,
-        'present': 0,
-        'absent': 0,
-      });
-    });
-  }
-
+void _addSubject(String name) {
+  final subject = {
+    'id': const Uuid().v4(),
+    'name': name,
+    'present': 0,
+    'absent': 0,
+  };
+  StorageService.instance.saveAttendance(subject);
+  setState(() => _subjects.add(subject));
+}
+@override
+void initState() {
+  super.initState();
+  _subjects = StorageService.instance.getAttendance();
+}
   void _markAttendance(String id, bool isPresent) {
-    setState(() {
-      final index = _subjects.indexWhere((s) => s['id'] == id);
-      if (index != -1) {
-        if (isPresent) {
-          _subjects[index]['present']++;
-        } else {
-          _subjects[index]['absent']++;
-        }
+  setState(() {
+    final index = _subjects.indexWhere((s) => s['id'] == id);
+    if (index != -1) {
+      if (isPresent) {
+        _subjects[index]['present']++;
+      } else {
+        _subjects[index]['absent']++;
       }
-    });
-  }
-
-  void _deleteSubject(String id) {
-    setState(() => _subjects.removeWhere((s) => s['id'] == id));
-  }
-
+      StorageService.instance.saveAttendance(_subjects[index]);
+    }
+  });
+}
+void _deleteSubject(String id) {
+  StorageService.instance.deleteAttendance(id);
+  setState(() => _subjects.removeWhere((s) => s['id'] == id));
+}
   double _getPercentage(Map<String, dynamic> subject) {
     final total = subject['present'] + subject['absent'];
     if (total == 0) return 0;
@@ -393,6 +396,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
+      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
       backgroundColor:
           isDark ? const Color(0xFF0D0D1A) : const Color(0xFFF4F6FF),
       body: CustomScrollView(
@@ -651,7 +655,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                     ),
                   ),
                 ),
-          const SliverToBoxAdapter(child: SizedBox(height: 100)),
+          const SliverToBoxAdapter(child: SizedBox(height: 220)),
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(

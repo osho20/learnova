@@ -131,6 +131,7 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
+      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
       backgroundColor:
           isDark ? const Color(0xFF0D0D1A) : const Color(0xFFF4F6FF),
       body: CustomScrollView(

@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:uuid/uuid.dart';
-
+import '../../core/services/storage_service.dart';
 class GradesScreen extends StatefulWidget {
   const GradesScreen({super.key});
 
@@ -12,18 +12,22 @@ class GradesScreen extends StatefulWidget {
 
 class _GradesScreenState extends State<GradesScreen> {
   List<Map<String, dynamic>> _subjects = [];
-
-  void _addSubject(String name, double currentScore, double totalScore) {
-    setState(() {
-      _subjects.add({
-        'id': const Uuid().v4(),
-        'name': name,
-        'currentScore': currentScore,
-        'totalScore': totalScore,
-        'targetScore': 90.0,
-      });
-    });
-  }
+void _addSubject(String name, double currentScore, double totalScore) {
+  final subject = {
+    'id': const Uuid().v4(),
+    'name': name,
+    'currentScore': currentScore,
+    'totalScore': totalScore,
+    'targetScore': 90.0,
+  };
+  StorageService.instance.saveGrade(subject);
+  setState(() => _subjects.add(subject));
+}
+  @override
+void initState() {
+  super.initState();
+  _subjects = StorageService.instance.getGrades();
+}
 
   double _getPercentage(Map<String, dynamic> subject) {
     if (subject['totalScore'] == 0) return 0;
@@ -190,6 +194,7 @@ class _GradesScreenState extends State<GradesScreen> {
     final overall = _overallPercentage;
 
     return Scaffold(
+      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
       backgroundColor:
           isDark ? const Color(0xFF0D0D1A) : const Color(0xFFF4F6FF),
       body: CustomScrollView(
@@ -426,7 +431,7 @@ class _GradesScreenState extends State<GradesScreen> {
                     ),
                   ),
                 ),
-          const SliverToBoxAdapter(child: SizedBox(height: 100)),
+          const SliverToBoxAdapter(child: SizedBox(height: 220)),
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(

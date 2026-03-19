@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:uuid/uuid.dart';
+import '../../core/services/storage_service.dart';
 
 class NotesScreen extends StatefulWidget {
   final String? subjectId;
@@ -16,6 +17,24 @@ class _NotesScreenState extends State<NotesScreen> {
   List<Map<String, dynamic>> _notes = [];
   String _searchQuery = '';
 
+  @override
+  void initState() {
+    super.initState();
+    _loadNotes();
+  }
+
+  void _loadNotes() {
+    final data = StorageService.instance.getNotes(subjectId: widget.subjectId);
+    setState(() {
+      _notes = data;
+      _notes.sort((a, b) {
+        if (b['isPinned'] != a['isPinned'])
+          return (b['isPinned'] as int) - (a['isPinned'] as int);
+        return b['createdAt'].compareTo(a['createdAt']);
+      });
+    });
+  }
+
   Color _tagColor(String? tag) {
     switch (tag) {
       case 'important': return Colors.red;
@@ -26,18 +45,22 @@ class _NotesScreenState extends State<NotesScreen> {
   }
 
   Future<void> _togglePin(Map<String, dynamic> note) async {
-    final newPin = note['isPinned'] == 1 ? 0 : 1;
+    final newPin = (note['isPinned'] as int) == 1 ? 0 : 1;
+    final updated = {...note, 'isPinned': newPin};
+    await StorageService.instance.saveNote(updated);
     setState(() {
       final index = _notes.indexWhere((n) => n['id'] == note['id']);
-      if (index != -1) _notes[index] = {...note, 'isPinned': newPin};
+      if (index != -1) _notes[index] = updated;
       _notes.sort((a, b) {
-        if (b['isPinned'] != a['isPinned']) return b['isPinned'] - a['isPinned'];
+        if (b['isPinned'] != a['isPinned'])
+          return (b['isPinned'] as int) - (a['isPinned'] as int);
         return b['createdAt'].compareTo(a['createdAt']);
       });
     });
   }
 
-  void _deleteNote(String id) {
+  Future<void> _deleteNote(String id) async {
+    await StorageService.instance.deleteNote(id);
     setState(() => _notes.removeWhere((n) => n['id'] == id));
   }
 
@@ -46,6 +69,25 @@ class _NotesScreenState extends State<NotesScreen> {
     return _notes.where((n) =>
         n['title'].toString().toLowerCase().contains(_searchQuery.toLowerCase()) ||
         n['content'].toString().toLowerCase().contains(_searchQuery.toLowerCase())).toList();
+  }
+
+  void _openNote(Map<String, dynamic> note) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => NoteDetailScreen(
+          note: note,
+          onEdit: (updated) async {
+            await StorageService.instance.saveNote(updated);
+            setState(() {
+              final index = _notes.indexWhere((n) => n['id'] == note['id']);
+              if (index != -1) _notes[index] = updated;
+            });
+          },
+          onDelete: () => _deleteNote(note['id']),
+        ),
+      ),
+    );
   }
 
   void _showAddNoteSheet({Map<String, dynamic>? existing}) {
@@ -84,7 +126,8 @@ class _NotesScreenState extends State<NotesScreen> {
               const SizedBox(height: 16),
               Text(existing != null ? 'Edit Note' : 'New Note',
                   style: GoogleFonts.poppins(fontSize: 22,
-                      fontWeight: FontWeight.w700, color: const Color(0xFF1A237E))),
+                      fontWeight: FontWeight.w700,
+                      color: const Color(0xFF1A237E))),
               const SizedBox(height: 16),
               TextField(
                 controller: titleController,
@@ -111,8 +154,7 @@ class _NotesScreenState extends State<NotesScreen> {
                       margin: const EdgeInsets.only(right: 8),
                       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                       decoration: BoxDecoration(
-                        color: isSelected
-                            ? _tagColor(tag) : _tagColor(tag).withOpacity(0.1),
+                        color: isSelected ? _tagColor(tag) : _tagColor(tag).withOpacity(0.1),
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: Text(tag,
@@ -148,34 +190,34 @@ class _NotesScreenState extends State<NotesScreen> {
                 width: double.infinity,
                 height: 54,
                 child: ElevatedButton(
-                  onPressed: () {
+                  onPressed: () async {
                     if (titleController.text.trim().isEmpty) return;
                     if (existing != null) {
+                      final updated = {
+                        ...existing,
+                        'title': titleController.text.trim(),
+                        'content': contentController.text.trim(),
+                        'tag': selectedTag,
+                      };
+                      await StorageService.instance.saveNote(updated);
                       setState(() {
                         final index = _notes.indexWhere((n) => n['id'] == existing['id']);
-                        if (index != -1) {
-                          _notes[index] = {
-                            ...existing,
-                            'title': titleController.text.trim(),
-                            'content': contentController.text.trim(),
-                            'tag': selectedTag,
-                          };
-                        }
+                        if (index != -1) _notes[index] = updated;
                       });
                     } else {
-                      setState(() {
-                        _notes.insert(0, {
-                          'id': const Uuid().v4(),
-                          'subjectId': widget.subjectId ?? 'general',
-                          'title': titleController.text.trim(),
-                          'content': contentController.text.trim(),
-                          'tag': selectedTag,
-                          'isPinned': 0,
-                          'createdAt': DateTime.now().toIso8601String(),
-                        });
-                      });
+                      final note = {
+                        'id': const Uuid().v4(),
+                        'subjectId': widget.subjectId ?? 'general',
+                        'title': titleController.text.trim(),
+                        'content': contentController.text.trim(),
+                        'tag': selectedTag,
+                        'isPinned': 0,
+                        'createdAt': DateTime.now().toIso8601String(),
+                      };
+                      await StorageService.instance.saveNote(note);
+                      setState(() => _notes.insert(0, note));
                     }
-                    Navigator.pop(context);
+                    if (mounted) Navigator.pop(context);
                   },
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFF1A237E),
@@ -223,9 +265,8 @@ class _NotesScreenState extends State<NotesScreen> {
                         Text('My Notes',
                             style: GoogleFonts.poppins(fontSize: 28,
                                 fontWeight: FontWeight.w700, color: Colors.white)),
-                        Text('${_notes.length} notes saved',
-                            style: GoogleFonts.poppins(
-                                fontSize: 13, color: Colors.white70)),
+                        Text('${_notes.length} notes • Tap to read',
+                            style: GoogleFonts.poppins(fontSize: 13, color: Colors.white70)),
                       ],
                     ),
                   ),
@@ -280,101 +321,107 @@ class _NotesScreenState extends State<NotesScreen> {
                       (context, index) {
                         final note = _filteredNotes[index];
                         final tagColor = _tagColor(note['tag']);
-                        return Container(
-                          margin: const EdgeInsets.only(bottom: 12),
-                          decoration: BoxDecoration(
-                            color: isDark ? const Color(0xFF1A1A2E) : Colors.white,
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border(left: BorderSide(color: tagColor, width: 4)),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.04),
-                                blurRadius: 10,
-                                offset: const Offset(0, 4),
+                        return GestureDetector(
+                          onTap: () => _openNote(note),
+                          child: Container(
+                            margin: const EdgeInsets.only(bottom: 12),
+                            decoration: BoxDecoration(
+                              color: isDark ? const Color(0xFF1A1A2E) : Colors.white,
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border(left: BorderSide(color: tagColor, width: 4)),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withOpacity(0.04),
+                                  blurRadius: 10,
+                                  offset: const Offset(0, 4),
+                                ),
+                              ],
+                            ),
+                            child: ListTile(
+                              contentPadding: const EdgeInsets.all(16),
+                              title: Row(
+                                children: [
+                                  if (note['isPinned'] == 1)
+                                    const Padding(
+                                      padding: EdgeInsets.only(right: 6),
+                                      child: Icon(Icons.push_pin_rounded,
+                                          size: 16, color: Colors.amber),
+                                    ),
+                                  Expanded(
+                                    child: Text(note['title'],
+                                        style: GoogleFonts.poppins(
+                                            fontSize: 15,
+                                            fontWeight: FontWeight.w700)),
+                                  ),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 8, vertical: 3),
+                                    decoration: BoxDecoration(
+                                      color: tagColor.withOpacity(0.1),
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: Text(note['tag'] ?? 'general',
+                                        style: GoogleFonts.poppins(
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w600,
+                                            color: tagColor)),
+                                  ),
+                                ],
                               ),
-                            ],
-                          ),
-                          child: ListTile(
-                            contentPadding: const EdgeInsets.all(16),
-                            title: Row(
-                              children: [
-                                if (note['isPinned'] == 1)
-                                  const Padding(
-                                    padding: EdgeInsets.only(right: 6),
-                                    child: Icon(Icons.push_pin_rounded,
-                                        size: 16, color: Colors.amber),
+                              subtitle: Padding(
+                                padding: const EdgeInsets.only(top: 6),
+                                child: Text(note['content'] ?? '',
+                                    style: GoogleFonts.poppins(
+                                        fontSize: 13, color: Colors.grey),
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis),
+                              ),
+                              trailing: PopupMenuButton(
+                                icon: const Icon(Icons.more_vert_rounded),
+                                shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12)),
+                                itemBuilder: (context) => [
+                                  PopupMenuItem(
+                                    onTap: () => Future.delayed(Duration.zero,
+                                        () => _showAddNoteSheet(existing: note)),
+                                    child: Row(children: [
+                                      const Icon(Icons.edit_rounded, size: 18),
+                                      const SizedBox(width: 8),
+                                      Text('Edit', style: GoogleFonts.poppins()),
+                                    ]),
                                   ),
-                                Expanded(
-                                  child: Text(note['title'],
-                                      style: GoogleFonts.poppins(
-                                          fontSize: 15, fontWeight: FontWeight.w700)),
-                                ),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 8, vertical: 3),
-                                  decoration: BoxDecoration(
-                                    color: tagColor.withOpacity(0.1),
-                                    borderRadius: BorderRadius.circular(8),
+                                  PopupMenuItem(
+                                    onTap: () => _togglePin(note),
+                                    child: Row(children: [
+                                      const Icon(Icons.push_pin_rounded, size: 18),
+                                      const SizedBox(width: 8),
+                                      Text(note['isPinned'] == 1 ? 'Unpin' : 'Pin',
+                                          style: GoogleFonts.poppins()),
+                                    ]),
                                   ),
-                                  child: Text(note['tag'] ?? 'general',
-                                      style: GoogleFonts.poppins(fontSize: 11,
-                                          fontWeight: FontWeight.w600,
-                                          color: tagColor)),
-                                ),
-                              ],
+                                  PopupMenuItem(
+                                    onTap: () => _deleteNote(note['id']),
+                                    child: Row(children: [
+                                      const Icon(Icons.delete_rounded,
+                                          size: 18, color: Colors.red),
+                                      const SizedBox(width: 8),
+                                      Text('Delete',
+                                          style: GoogleFonts.poppins(
+                                              color: Colors.red)),
+                                    ]),
+                                  ),
+                                ],
+                              ),
                             ),
-                            subtitle: Padding(
-                              padding: const EdgeInsets.only(top: 6),
-                              child: Text(note['content'] ?? '',
-                                  style: GoogleFonts.poppins(
-                                      fontSize: 13, color: Colors.grey),
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis),
-                            ),
-                            trailing: PopupMenuButton(
-                              icon: const Icon(Icons.more_vert_rounded),
-                              shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12)),
-                              itemBuilder: (context) => [
-                                PopupMenuItem(
-                                  onTap: () => Future.delayed(Duration.zero,
-                                      () => _showAddNoteSheet(existing: note)),
-                                  child: Row(children: [
-                                    const Icon(Icons.edit_rounded, size: 18),
-                                    const SizedBox(width: 8),
-                                    Text('Edit', style: GoogleFonts.poppins()),
-                                  ]),
-                                ),
-                                PopupMenuItem(
-                                  onTap: () => _togglePin(note),
-                                  child: Row(children: [
-                                    const Icon(Icons.push_pin_rounded, size: 18),
-                                    const SizedBox(width: 8),
-                                    Text(note['isPinned'] == 1 ? 'Unpin' : 'Pin',
-                                        style: GoogleFonts.poppins()),
-                                  ]),
-                                ),
-                                PopupMenuItem(
-                                  onTap: () => _deleteNote(note['id']),
-                                  child: Row(children: [
-                                    const Icon(Icons.delete_rounded,
-                                        size: 18, color: Colors.red),
-                                    const SizedBox(width: 8),
-                                    Text('Delete',
-                                        style: GoogleFonts.poppins(color: Colors.red)),
-                                  ]),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ).animate().fadeIn(delay: (index * 80).ms)
-                            .slideX(begin: -0.1, end: 0);
+                          ).animate().fadeIn(delay: (index * 80).ms)
+                              .slideX(begin: -0.1, end: 0),
+                        );
                       },
                       childCount: _filteredNotes.length,
                     ),
                   ),
                 ),
-          const SliverToBoxAdapter(child: SizedBox(height: 100)),
+          const SliverToBoxAdapter(child: SizedBox(height: 220)),
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
@@ -385,6 +432,179 @@ class _NotesScreenState extends State<NotesScreen> {
             style: GoogleFonts.poppins(fontSize: 14,
                 fontWeight: FontWeight.w600, color: Colors.white)),
       ).animate().fadeIn(delay: 300.ms).slideY(begin: 0.5, end: 0),
+    );
+  }
+}
+
+class NoteDetailScreen extends StatefulWidget {
+  final Map<String, dynamic> note;
+  final Function(Map<String, dynamic>) onEdit;
+  final VoidCallback onDelete;
+
+  const NoteDetailScreen({
+    super.key,
+    required this.note,
+    required this.onEdit,
+    required this.onDelete,
+  });
+
+  @override
+  State<NoteDetailScreen> createState() => _NoteDetailScreenState();
+}
+
+class _NoteDetailScreenState extends State<NoteDetailScreen> {
+  late Map<String, dynamic> _note;
+  bool _isEditing = false;
+  late TextEditingController _titleController;
+  late TextEditingController _contentController;
+
+  @override
+  void initState() {
+    super.initState();
+    _note = Map.from(widget.note);
+    _titleController = TextEditingController(text: _note['title']);
+    _contentController = TextEditingController(text: _note['content']);
+  }
+
+  Color _tagColor(String? tag) {
+    switch (tag) {
+      case 'important': return Colors.red;
+      case 'review': return Colors.orange;
+      case 'exam': return Colors.purple;
+      default: return const Color(0xFF1A237E);
+    }
+  }
+
+  void _saveEdit() {
+    setState(() {
+      _note = {
+        ..._note,
+        'title': _titleController.text.trim(),
+        'content': _contentController.text.trim(),
+      };
+      _isEditing = false;
+    });
+    widget.onEdit(_note);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final tagColor = _tagColor(_note['tag']);
+
+    return Scaffold(
+      backgroundColor:
+          isDark ? const Color(0xFF0D0D1A) : const Color(0xFFF4F6FF),
+      appBar: AppBar(
+        backgroundColor: tagColor,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios_rounded, color: Colors.white),
+          onPressed: () => Navigator.pop(context),
+        ),
+        title: Text(_isEditing ? 'Editing...' : _note['title'],
+            style: GoogleFonts.poppins(
+                fontSize: 16, fontWeight: FontWeight.w600,
+                color: Colors.white),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis),
+        actions: [
+          if (_isEditing)
+            IconButton(
+              icon: const Icon(Icons.check_rounded, color: Colors.white),
+              onPressed: _saveEdit,
+            )
+          else ...[
+            IconButton(
+              icon: const Icon(Icons.edit_rounded, color: Colors.white),
+              onPressed: () => setState(() => _isEditing = true),
+            ),
+            IconButton(
+              icon: const Icon(Icons.delete_rounded, color: Colors.white),
+              onPressed: () {
+                widget.onDelete();
+                Navigator.pop(context);
+              },
+            ),
+          ],
+        ],
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: tagColor.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: tagColor.withOpacity(0.3)),
+              ),
+              child: Text(_note['tag'] ?? 'general',
+                  style: GoogleFonts.poppins(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: tagColor)),
+            ),
+            const SizedBox(height: 16),
+            if (_isEditing)
+              TextField(
+                controller: _titleController,
+                style: GoogleFonts.poppins(
+                    fontSize: 22, fontWeight: FontWeight.w700),
+                decoration: InputDecoration(
+                  hintText: 'Title...',
+                  filled: true,
+                  fillColor: isDark
+                      ? const Color(0xFF1A1A2E) : Colors.white,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
+              )
+            else
+              Text(_note['title'],
+                  style: GoogleFonts.poppins(
+                      fontSize: 24,
+                      fontWeight: FontWeight.w800,
+                      color: isDark
+                          ? Colors.white : const Color(0xFF1A237E))),
+            const SizedBox(height: 8),
+            Text(
+              _note['createdAt']?.toString().substring(0, 10) ?? '',
+              style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey),
+            ),
+            const Divider(height: 32),
+            if (_isEditing)
+              TextField(
+                controller: _contentController,
+                maxLines: null,
+                style: GoogleFonts.poppins(fontSize: 15, height: 1.8),
+                decoration: InputDecoration(
+                  hintText: 'Write your notes...',
+                  filled: true,
+                  fillColor: isDark
+                      ? const Color(0xFF1A1A2E) : Colors.white,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
+              )
+            else
+              Text(
+                _note['content'] ?? '',
+                style: GoogleFonts.poppins(
+                    fontSize: 15,
+                    height: 1.8,
+                    color: isDark ? Colors.white70 : Colors.black87),
+              ),
+            const SizedBox(height: 100),
+          ],
+        ),
+      ),
     );
   }
 }
